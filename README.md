@@ -8,6 +8,14 @@
 
 # Deployment notes
 
+**Build**
+
+```
+rm dist/dist.zip
+zip -9 -r dist/dist.zip lib/python3.6/site-packages -x .\*
+zip -9 -g dist/dist.zip . -x dist/\* bin/\* lib/\* .\*
+```
+
 **Make it so**
 
 ```

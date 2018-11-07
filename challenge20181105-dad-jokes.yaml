@@ -1,0 +1,53 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'The #noServerNovember Dad Jokes challenge'
+Parameters:
+  CfnCodeS3Bucket:
+    Description: S3 bucket containing code zip
+    Type: String
+  CfnCodeS3Key:
+    Description: S3 key containing code zip
+    Type: String
+
+Resources:
+  FunctionExecRole:
+    Type: AWS::IAM::Role
+    Properties:
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Action: ['sts:AssumeRole']
+          Effect: Allow
+          Principal:
+            Service: [lambda.amazonaws.com]
+
+  TwitterBotDadJokesFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: 'Twitter bot for #noServerNovember challenge'
+      Handler: dad.handler
+      Runtime: python3.6
+      Role: !GetAtt FunctionExecRole.Arn
+      Timeout: 11
+      Code:
+        S3Bucket: !Ref CfnCodeS3Bucket
+        S3Key: !Ref CfnCodeS3Key
+
+  BotPostingSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      ScheduleExpression: rate(1 hour)
+      Targets:
+        - Id: TwitterBotDadJokesFunction
+          Arn: !GetAtt TwitterBotDadJokesFunction.Arn
+
+  WorkstreamCheckerPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref TwitterBotDadJokesFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt BotPostingSchedule.Arn
+

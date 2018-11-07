@@ -1,0 +1,8 @@
+config.ini
+.env
+pyvenv.cfg
+pip-selfcheck.json
+bin/
+lib/
+build/
+dist/
