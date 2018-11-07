@@ -93,21 +93,32 @@ Resources:
         ZipFile: !Sub |
           import json
           import logging
-
+        
           logger = logging.getLogger()
           logger.setLevel(logging.INFO)
-
+        
           def handler(event, context):
-            return { 
-                'statusCode': 200,
-                'headers': {
-                  'Content-Type': 'text/html',
-                }
-                'body': {
-                    "<h1>serverless</h1>"
-                },
-            )
+            body = """
+            <!DOCTYPE html>
+            <html lang="la">
+              <head><title>Serverless Ipsum</title></head>
+              <body style="font-family: 'Plex', sans-serif;">
+                <h1>Serverless Ipsum</h1>
+                <p style="text-align: right">#noServerNovember</p>
+              </body>
+            </html>
+            """
 
+            response = {
+              "statusCode": 200,
+              "headers": {
+                "Content-Type": "text/html; charset=utf-8",
+              },
+              "body": body
+            }
+            
+            return response
+      
   ServerlessIpsumFunctionPermission:
     Type: AWS::Lambda::Permission
     Properties:
