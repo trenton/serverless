@@ -103,7 +103,7 @@ Resources:
             <html lang="la">
               <head><title>Serverless Ipsum</title></head>
               <body style="font-family: 'Plex', sans-serif;">
-                <h1>Serverless Ipsum</h1>
+                <h1><a href="https://github.com/trenton/serverless">Serverless Ipsum</a></h1>
                 <p style="text-align: right">#noServerNovember</p>
               </body>
             </html>
