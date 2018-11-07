@@ -16,6 +16,6 @@ aws cloudformation update-stack --stack-name serverless003 --template-body file:
 
 **Determine endpoint**
 
-``
+```
 aws cloudformation describe-stacks --stack-name serverless003 |jq '.Stacks[] | .Outputs[] | select(.OutputKey == "ProdEndpoint").OutputValue'
 ```
