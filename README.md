@@ -8,6 +8,14 @@
 
 # Deployment notes
 
+**Make it so**
+
 ```
 aws cloudformation update-stack --stack-name serverless003 --template-body file://challenge20181105-serverless-ipsum.yaml --capabilities CAPABILITY_IAM
+```
+
+**Determine endpoint**
+
+``
+aws cloudformation describe-stacks --stack-name serverless003 |jq '.Stacks[] | .Outputs[] | select(.OutputKey == "ProdEndpoint").OutputValue'
 ```
