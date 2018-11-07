@@ -2,6 +2,10 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: 'The #noServerNovember Serverless Ipsum challenge'
 
+Outputs:
+  ProdEndpoint:
+    Value: !Sub "https://${ApiGw}.execute-api.${AWS::Region}.amazonaws.com/${ApiGwStage}/serverless"
+
 Resources:
   ApiGwCloudWatchRole: 
     Type: AWS::IAM::Role
@@ -134,3 +138,4 @@ Resources:
           - ':'
           - !Ref ApiGw
           - '/*'
+
