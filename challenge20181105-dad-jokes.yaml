@@ -50,4 +50,4 @@ Resources:
       Action: lambda:InvokeFunction
       Principal: events.amazonaws.com
       SourceArn: !GetAtt BotPostingSchedule.Arn
-
+...
