@@ -7,25 +7,26 @@ import yaml
 import requests
 
 
-api_key=None
-api_secret_key=None
-access_token=None
-access_token_secret=None
-dry_run=True if 'DRY_RUN' in os.environ else False
+joke_endpoint = 'https://icanhazdadjoke.com/'
 
-twitter=None
+api_key = None
+api_secret_key = None
+access_token = None
+access_token_secret = None
+dry_run = True if 'DRY_RUN' in os.environ else False
+
+twitter = None
 
 
 def get_joke():
-    endpoint = 'https://icanhazdadjoke.com/'
     response = requests.get(
-        endpoint,
-        headers = {
+        joke_endpoint,
+        headers={
+            # Use json. Had charset problems with text/plain
             'Accept': 'application/json',
-        },
+        }
     )
 
-    # use json... had charset problems with plain/text
     if response.status_code == requests.codes.ok:
         joke = yaml.load(response.text)
         return joke['joke']
@@ -33,13 +34,10 @@ def get_joke():
         raise RuntimeError(f"Got {requests.status_code} from {endpoint}")
 
 
-def handler(event, context):
-    return do_tweet()
-
 def do_tweet():
-    joke=get_joke()
+    joke = get_joke()
 
-    status=f"It's time for another one…\n\n{joke}\n\n#noServerNovember"
+    status = f"It's time for another one…\n\n{joke}\n\n#noServerNovember"
 
     if not dry_run:
         out = twitter.statuses.update(status=status)
@@ -47,6 +45,11 @@ def do_tweet():
         out = {"did not post": status}
 
     return out
+
+
+def handler(event, context):
+    return do_tweet()
+
 
 config = configparser.ConfigParser()
 config.read('config.ini')
@@ -64,4 +67,3 @@ twitter = Twitter(
 
 if __name__ == "__main__":
     print(yaml.dump(do_tweet()))
-
