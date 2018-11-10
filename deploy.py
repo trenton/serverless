@@ -7,12 +7,14 @@ import os
 import re
 import time
 import zipfile
+import base64
 
 
 AWS_REGION = 'us-west-2'
 CFN_BUCKET = 'cloudformation-us-west-2-645086751203'
 CFN_TEMPLATE_FILE = 'challenge20181105-dad-jokes.yaml'
 STACK_NAME = 'serverless-dadjokes-001'
+CONFIG_PARAM = 'dadjoke'
 
 
 def make_param(key, value):
@@ -26,6 +28,7 @@ wait_for_ready_seconds = 60 * 3
 aws = boto3.Session(region_name=AWS_REGION)
 s3 = aws.resource('s3')
 cfn = aws.client('cloudformation')
+ssm = aws.client('ssm')
 
 now = int(time.time())
 
@@ -38,11 +41,18 @@ else:
     except FileNotFoundError:
         pass
 
+print('Downloading config to dist/config.ini')
+ssm_response = ssm.get_parameters(Names=[CONFIG_PARAM], WithDecryption=True)
+config = base64.b64decode(ssm_response['Parameters'][0]['Value'])
+config_file = 'dist/config.ini'
+with open(config_file, 'wb') as ini:
+    ini.write(config)
+
 build_and_upload = True
 if build_and_upload:
     print(f"Making zip in {distfile}")
     with zipfile.ZipFile(distfile, 'w', zipfile.ZIP_DEFLATED) as zipf:
-        python_site = 'lib/python3.6/site-packages/'
+        python_site = f"lib/{os.listdir('lib')[0]}/site-packages/"
         for root, dirs, files in os.walk(python_site):
             for file in files:
                 full_path = root + "/" + file
@@ -57,9 +67,11 @@ if build_and_upload:
 
                 zipf.write(full_path, archive_path)
 
-        more_files = [glob.glob(x) for x in ['*py', '*ini', '*yaml']]
+        more_files = [glob.glob(x) for x in ['*py', '*yaml']]
         for file in itertools.chain(*more_files):
             zipf.write(file)
+
+        zipf.write(config_file, 'config.ini')
 
     # add time since epoch to get a different value on each deploy
     # preferring ergonomics over uniqueness, so not using a uuid

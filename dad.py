@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 
-import configparser
 from twitter import *
+import configparser
 import os
-import yaml
 import requests
+import yaml
 
 
 joke_endpoint = 'https://icanhazdadjoke.com/'
@@ -31,7 +31,7 @@ def get_joke():
         joke = yaml.load(response.text)
         return joke['joke']
     else:
-        raise RuntimeError(f"Got {requests.status_code} from {endpoint}")
+        raise RuntimeError(f"Got {response.status_code} from {endpoint}")
 
 
 def do_tweet():
