@@ -1,25 +1,35 @@
 #!/usr/bin/env python3
 
+import boto3
 import glob
 import itertools
 import os
 import re
-import shutil
-import subprocess
-import tempfile
 import time
 import zipfile
+
 
 AWS_REGION = 'us-west-2'
 CFN_BUCKET = 'cloudformation-us-west-2-645086751203'
 CFN_TEMPLATE_FILE = 'challenge20181105-dad-jokes.yaml'
 STACK_NAME = 'serverless-dadjokes-001'
 
-_, temp_output_template = tempfile.mkstemp(suffix='.json')
 
-project_root = os.getcwd()
+def make_param(key, value):
+    return {
+        'ParameterKey': key,
+        'ParameterValue': value
+    }
 
-distfile = f"{project_root}/dist/pydist.zip"
+wait_for_ready_seconds = 60 * 3
+
+aws = boto3.Session(region_name=AWS_REGION)
+s3 = aws.resource('s3')
+cfn = aws.client('cloudformation')
+
+now = int(time.time())
+
+distfile = f"{os.getcwd()}/dist/pydist.zip"
 if not os.path.isdir('dist'):
     os.mkdir('dist')
 else:
@@ -53,38 +63,36 @@ if build_and_upload:
 
     # add time since epoch to get a different value on each deploy
     # preferring ergonomics over uniqueness, so not using a uuid
-    zip_code_s3_key = f"{STACK_NAME}/dist-{int(time.time())}.zip"
+    zip_code_s3_key = f'{STACK_NAME}/dist-{now}.zip'
     s3_target = f's3://{CFN_BUCKET}/{zip_code_s3_key}'
 
-    print(f"Copying to {distfile} to {s3_target}")
-    s3_cmd = f'aws --region {AWS_REGION} s3 cp {distfile} {s3_target}'
-    cp_result = subprocess.run(
-        re.split(r'\s+', s3_cmd),
-        timeout=333,
-        check=True,
-    )
+    print(f'Copying to {distfile} to {s3_target}')
+    s3.Object(CFN_BUCKET, zip_code_s3_key).put(Body=open(distfile, 'rb'))
 
-print(f"Packaging to {temp_output_template}")
-package_cmd = (
-    f"aws --region {AWS_REGION} cloudformation package"
-    f"    --template-file {CFN_TEMPLATE_FILE}"
-    f"    --output-template-file {temp_output_template}"
-    f"    --s3-bucket {CFN_BUCKET}"
-    f"    --s3-prefix {STACK_NAME}"
-    f"    --use-json"
+print(f"Creating changeset")
+create_response = cfn.create_change_set(
+    StackName=STACK_NAME,
+    Capabilities=['CAPABILITY_NAMED_IAM'],
+    ChangeSetName=f'z{now}',
+    TemplateBody=open(CFN_TEMPLATE_FILE, 'r').read(),
+    Parameters=[
+        make_param('CfnCodeS3Bucket', CFN_BUCKET),
+        make_param('CfnCodeS3Key', zip_code_s3_key),
+    ],
 )
-subprocess.run(re.split(r'\s+', package_cmd), timeout=333, check=True)
 
-print(f"Deploying stack {STACK_NAME}")
-deploy_cmd = (
-    f"aws --region {AWS_REGION} cloudformation deploy"
-    f"     --stack-name {STACK_NAME}"
-    f"     --template-file {temp_output_template}"
-    f"     --capabilities CAPABILITY_NAMED_IAM"
-    f"     --s3-bucket {CFN_BUCKET}"
-    f"     --debug"
-    f"     --parameter-overrides"
-    f"	     CfnCodeS3Bucket={CFN_BUCKET}"
-    f"	     CfnCodeS3Key={zip_code_s3_key}"
-)
-subprocess.run(re.split(r'\s+', deploy_cmd), timeout=333, check=True)
+change_set_id = create_response['Id']
+
+print(f"Waiting for changeset {change_set_id} to be ready")
+wait_util = time.time() + wait_for_ready_seconds
+while time.time() < wait_util:
+    change_set = cfn.describe_change_set(ChangeSetName=change_set_id)
+    print(f"...status was {change_set['Status']}")
+
+    if change_set['Status'] == 'CREATE_COMPLETE':
+        break
+    else:
+        time.sleep(3)
+
+print(f"Executing changeset {change_set_id}")
+cfn.execute_change_set(ChangeSetName=change_set_id)
