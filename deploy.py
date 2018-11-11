@@ -31,32 +31,36 @@ ssm = aws.client('ssm')
 
 now = int(time.time())
 
-if not os.path.isdir(BUILD_DIR):
-    os.mkdir(BUILD_DIR)
+def setup():
+    if not os.path.isdir(BUILD_DIR):
+        os.mkdir(BUILD_DIR)
 
-distfile = f"{os.getcwd()}/dist/pydist.zip"
-if not os.path.isdir('dist'):
-    os.mkdir('dist')
-else:
-    try:
-        os.remove(distfile)
-    except FileNotFoundError:
-        pass
+    dist_file = f"{os.getcwd()}/dist/pydist.zip"
+    if not os.path.isdir('dist'):
+        os.mkdir('dist')
+    else:
+        try:
+            os.remove(dist_file)
+        except FileNotFoundError:
+            pass
 
-print("Installing dependencies")
-out = subprocess.run(
-    [sys.executable, "-m", "pip", "install", "-t", BUILD_DIR, "-r", "requirements.txt"],
-    check=True,
-)
+    return dist_file
 
-print('Downloading config to {CONFIG_FILE}')
-ssm_response = ssm.get_parameters(Names=[CONFIG_PARAM], WithDecryption=True)
-config = base64.b64decode(ssm_response['Parameters'][0]['Value'])
-with open(CONFIG_FILE, 'wb') as ini:
-    ini.write(config)
+def install_deps():
+    print("Installing dependencies")
+    out = subprocess.run(
+        [sys.executable, "-m", "pip", "install", "-t", BUILD_DIR, "-r", "requirements.txt"],
+        check=True,
+    )
 
-build_and_upload = True
-if build_and_upload:
+def download_config():
+    print('Downloading config to {CONFIG_FILE}')
+    ssm_response = ssm.get_parameters(Names=[CONFIG_PARAM], WithDecryption=True)
+    config = base64.b64decode(ssm_response['Parameters'][0]['Value'])
+    with open(CONFIG_FILE, 'wb') as ini:
+        ini.write(config)
+
+def build_and_upload(distfile):
     print(f"Making zip in {distfile}")
     with zipfile.ZipFile(distfile, 'w', zipfile.ZIP_DEFLATED) as zipf:
         for root, dirs, files in os.walk(BUILD_DIR):
@@ -84,33 +88,48 @@ if build_and_upload:
     zip_code_s3_key = f'{STACK_NAME}/dist-{now}.zip'
     s3_target = f's3://{CFN_BUCKET}/{zip_code_s3_key}'
 
-    print(f'Copying to {distfile} to {s3_target}')
+    print(f'Uploading to {distfile} to {s3_target}')
     s3.Object(CFN_BUCKET, zip_code_s3_key).put(Body=open(distfile, 'rb'))
 
-print(f"Creating changeset")
-create_response = cfn.create_change_set(
-    StackName=STACK_NAME,
-    Capabilities=['CAPABILITY_NAMED_IAM'],
-    ChangeSetName=f'z{now}',
-    TemplateBody=open(CFN_TEMPLATE_FILE, 'r').read(),
-    Parameters=[
-        {'ParameterKey': 'CfnCodeS3Bucket', 'ParameterValue': CFN_BUCKET},
-        {'ParameterKey': 'CfnCodeS3Key', 'ParameterValue': zip_code_s3_key},
-    ],
-)
+    return zip_code_s3_key
 
-change_set_id = create_response['Id']
+def create_change_set(s3_code_key, poll=True):
+    print(f"Creating change set")
+    create_response = cfn.create_change_set(
+        StackName=STACK_NAME,
+        Capabilities=['CAPABILITY_NAMED_IAM'],
+        ChangeSetName=f'z{now}',
+        TemplateBody=open(CFN_TEMPLATE_FILE, 'r').read(),
+        Parameters=[
+            {'ParameterKey': 'CfnCodeS3Bucket', 'ParameterValue': CFN_BUCKET},
+            {'ParameterKey': 'CfnCodeS3Key', 'ParameterValue': s3_code_key},
+        ],
+    )
 
-print(f"Waiting for changeset {change_set_id} to be ready")
-wait_util = time.time() + WAIT_FOR_READY_SECONDS
-while time.time() < wait_util:
-    change_set = cfn.describe_change_set(ChangeSetName=change_set_id)
-    print(f"...status was {change_set['Status']}")
+    change_set_id = create_response['Id']
 
-    if change_set['Status'] == 'CREATE_COMPLETE':
-        break
-    else:
-        time.sleep(3)
+    print(f"Waiting for change set {change_set_id} to be ready")
+    wait_until = time.time() + WAIT_FOR_READY_SECONDS
+    while time.time() < wait_until:
+        change_set = cfn.describe_change_set(ChangeSetName=change_set_id)
+        print(f"...status was {change_set['Status']}")
 
-print(f"Executing changeset {change_set_id}")
-cfn.execute_change_set(ChangeSetName=change_set_id)
+        if change_set['Status'] == 'CREATE_COMPLETE':
+            break
+        else:
+            time.sleep(3)
+
+        return change_set_id
+
+def execute_change_set(change_set_id):
+    print(f"Executing change set {change_set_id}")
+    cfn.execute_change_set(ChangeSetName=change_set_id)
+
+if __name__ == "__main__":
+    dist_file = setup()
+
+    install_deps()
+    download_config()
+    s3_key = build_and_upload(dist_file)
+    change_set_id = create_change_set(s3_key)
+    execute_change_set(change_set_id)
