@@ -13,123 +13,137 @@ import time
 import zipfile
 
 
-AWS_REGION = 'us-west-2'
-CFN_BUCKET = 'cloudformation-us-west-2-645086751203'
-CFN_TEMPLATE_FILE = 'challenge20181105-dad-jokes.yaml'
-STACK_NAME = 'serverless-dadjokes-001'
-CONFIG_PARAM = 'dadjoke'
+class Deployer:
+    WAIT_FOR_READY_SECONDS = 60 * 3
 
-BUILD_DIR = 'build'
-CONFIG_FILE = 'dist/config.ini'
+    def __init__(self):
+        aws_region = 'us-west-2'
+        self.cfn_bucket = 'cloudformation-us-west-2-645086751203'
+        self.cfn_template_file = 'challenge20181105-dad-jokes.yaml'
+        self.stack_name = 'serverless-dadjokes-001'
+        self.ssm_config_name = 'dadjoke'
 
-WAIT_FOR_READY_SECONDS = 60 * 3
+        self.build_dir = 'build'
+        self.dist_dir = 'dist'
+        self.config_file = 'dist/config.ini'
 
-aws = boto3.Session(region_name=AWS_REGION)
-s3 = aws.resource('s3')
-cfn = aws.client('cloudformation')
-ssm = aws.client('ssm')
+        aws = boto3.Session(region_name=aws_region)
 
-now = int(time.time())
+        self.s3 = aws.resource('s3')
+        self.cfn = aws.client('cloudformation')
+        self.ssm = aws.client('ssm')
+        self.now = int(time.time())
 
-def setup():
-    if not os.path.isdir(BUILD_DIR):
-        os.mkdir(BUILD_DIR)
+        # set during execution of steps
+        self.dist_file = None
+        self.s3_code_url = None
+        self.change_set_id = None
 
-    dist_file = f"{os.getcwd()}/dist/pydist.zip"
-    if not os.path.isdir('dist'):
-        os.mkdir('dist')
-    else:
-        try:
-            os.remove(dist_file)
-        except FileNotFoundError:
-            pass
+    def setup(self):
+        if not os.path.isdir(self.build_dir):
+            os.mkdir(self.build_dir)
 
-    return dist_file
-
-def install_deps():
-    print("Installing dependencies")
-    out = subprocess.run(
-        [sys.executable, "-m", "pip", "install", "-t", BUILD_DIR, "-r", "requirements.txt"],
-        check=True,
-    )
-
-def download_config():
-    print('Downloading config to {CONFIG_FILE}')
-    ssm_response = ssm.get_parameters(Names=[CONFIG_PARAM], WithDecryption=True)
-    config = base64.b64decode(ssm_response['Parameters'][0]['Value'])
-    with open(CONFIG_FILE, 'wb') as ini:
-        ini.write(config)
-
-def build_and_upload(distfile):
-    print(f"Making zip in {distfile}")
-    with zipfile.ZipFile(distfile, 'w', zipfile.ZIP_DEFLATED) as zipf:
-        for root, dirs, files in os.walk(BUILD_DIR):
-            for file in files:
-                full_path = root + "/" + file
-                archive_path = full_path.replace(BUILD_DIR, "")
-
-                # skip stuff not needed at runtime
-                if archive_path.startswith(('pip/', 'pkg_resources/', 'pip-', 'bin/')):
-                    continue
-
-                if archive_path.endswith(('.pyc', '.so', '.exe')):
-                    continue
-
-                zipf.write(full_path, archive_path)
-
-        more_files = [glob.glob(x) for x in ['*py', '*yaml']]
-        for file in itertools.chain(*more_files):
-            zipf.write(file)
-
-        zipf.write(CONFIG_FILE, 'config.ini')
-
-    # add time since epoch to get a different value on each deploy
-    # preferring ergonomics over uniqueness, so not using a uuid
-    zip_code_s3_key = f'{STACK_NAME}/dist-{now}.zip'
-    s3_target = f's3://{CFN_BUCKET}/{zip_code_s3_key}'
-
-    print(f'Uploading to {distfile} to {s3_target}')
-    s3.Object(CFN_BUCKET, zip_code_s3_key).put(Body=open(distfile, 'rb'))
-
-    return zip_code_s3_key
-
-def create_change_set(s3_code_key, poll=True):
-    print(f"Creating change set")
-    create_response = cfn.create_change_set(
-        StackName=STACK_NAME,
-        Capabilities=['CAPABILITY_NAMED_IAM'],
-        ChangeSetName=f'z{now}',
-        TemplateBody=open(CFN_TEMPLATE_FILE, 'r').read(),
-        Parameters=[
-            {'ParameterKey': 'CfnCodeS3Bucket', 'ParameterValue': CFN_BUCKET},
-            {'ParameterKey': 'CfnCodeS3Key', 'ParameterValue': s3_code_key},
-        ],
-    )
-
-    change_set_id = create_response['Id']
-
-    print(f"Waiting for change set {change_set_id} to be ready")
-    wait_until = time.time() + WAIT_FOR_READY_SECONDS
-    while time.time() < wait_until:
-        change_set = cfn.describe_change_set(ChangeSetName=change_set_id)
-        print(f"...status was {change_set['Status']}")
-
-        if change_set['Status'] == 'CREATE_COMPLETE':
-            break
+        dist_file = f"{os.getcwd()}/{self.dist_dir}/pydist.zip"
+        if not os.path.isdir(self.dist_dir):
+            os.mkdir(self.dist_dir)
         else:
-            time.sleep(3)
+            try:
+                os.remove(dist_file)
+            except FileNotFoundError:
+                pass
 
-        return change_set_id
+        self.dist_file = dist_file
 
-def execute_change_set(change_set_id):
-    print(f"Executing change set {change_set_id}")
-    cfn.execute_change_set(ChangeSetName=change_set_id)
+    def install_deps(self):
+        print("Installing dependencies")
+        out = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-t", self.build_dir, "-r", "requirements.txt"],
+            check=True,
+        )
+
+    def download_config(self):
+        print(f'Downloading config to {self.config_file}')
+        ssm_response = self.ssm.get_parameters(
+                Names=[self.ssm_config_name],
+                WithDecryption=True
+        )
+        config = base64.b64decode(ssm_response['Parameters'][0]['Value'])
+        with open(self.config_file, 'wb') as ini:
+            ini.write(config)
+
+    def build(self):
+        print(f"Making zip in {self.dist_file}")
+        with zipfile.ZipFile(self.dist_file, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for root, dirs, files in os.walk(self.build_dir):
+                for file in files:
+                    full_path = root + "/" + file
+                    archive_path = full_path.replace(self.build_dir, "")
+
+                    # skip stuff not needed at runtime
+                    if archive_path.startswith(('pip/', 'pkg_resources/', 'pip-', 'bin/')):
+                        continue
+
+                    if archive_path.endswith(('.pyc', '.so', '.exe')):
+                        continue
+
+                    zipf.write(full_path, archive_path)
+
+            more_files = [glob.glob(x) for x in ['*py', '*yaml']]
+            for file in itertools.chain(*more_files):
+                zipf.write(file)
+
+            zipf.write(self.config_file, 'config.ini')
+
+    def upload(self):
+        # add time since epoch to get a different value on each deploy
+        # preferring ergonomics over uniqueness, so not using a uuid
+        zip_code_s3_key = f'{self.stack_name}/dist-{self.now}.zip'
+        s3_url = f's3://{self.cfn_bucket}/{zip_code_s3_key}'
+
+        print(f'Uploading to {self.dist_file} to {s3_url}')
+        self.s3.Object(self.cfn_bucket, zip_code_s3_key).put(Body=open(self.dist_file, 'rb'))
+
+        self.s3_code_key = zip_code_s3_key
+
+    def create_change_set(self, poll=True):
+        print(f"Creating change set")
+        create_response = self.cfn.create_change_set(
+            StackName=self.stack_name,
+            Capabilities=['CAPABILITY_NAMED_IAM'],
+            ChangeSetName=f'z{self.now}',
+            TemplateBody=open(self.cfn_template_file, 'r').read(),
+            Parameters=[
+                {'ParameterKey': 'CfnCodeS3Bucket', 'ParameterValue': self.cfn_bucket},
+                {'ParameterKey': 'CfnCodeS3Key', 'ParameterValue': self.s3_code_key},
+            ],
+        )
+
+        change_set_id = create_response['Id']
+
+        print(f"Waiting for change set {change_set_id} to be ready")
+        wait_until = time.time() + Deployer.WAIT_FOR_READY_SECONDS
+        while time.time() < wait_until:
+            change_set = self.cfn.describe_change_set(ChangeSetName=change_set_id)
+            print(f"...status was {change_set['Status']}")
+
+            if change_set['Status'] == 'CREATE_COMPLETE':
+                self.change_set_id = change_set_id
+                break
+            else:
+                time.sleep(3)
+
+    def execute_change_set(self):
+        print(f"Executing change set {self.change_set_id}")
+        self.cfn.execute_change_set(ChangeSetName=self.change_set_id)
+
 
 if __name__ == "__main__":
-    dist_file = setup()
+    deployer = Deployer()
 
-    install_deps()
-    download_config()
-    s3_key = build_and_upload(dist_file)
-    change_set_id = create_change_set(s3_key)
-    execute_change_set(change_set_id)
+    deployer.setup()
+    deployer.install_deps()
+    deployer.download_config()
+    deployer.build()
+    deployer.upload()
+    deployer.create_change_set()
+    deployer.execute_change_set()
