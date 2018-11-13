@@ -29,5 +29,10 @@ aws cloudformation describe-stacks --stack-name serverless003 |jq '.Stacks[] | .
 python3 -m venv .
 pip install -r requirements.txt
 DRY_RUN=yes ./dad.py
-./deploy.sh
+./deploy.py \
+    --cfn-bucket cloudformation-us-west-2-645086751203 \
+    --cfn-template challenge20181105-dad-jokes.yaml \
+    --stack-name serverless-dadjokes-001 \
+    --ssm-config-name dadjoke
+
 ```

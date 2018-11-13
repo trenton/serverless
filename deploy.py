@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import argparse
 import base64
 import boto3
 import glob
@@ -16,12 +17,11 @@ import zipfile
 class Deployer:
     WAIT_FOR_READY_SECONDS = 60 * 3
 
-    def __init__(self):
-        aws_region = 'us-west-2'
-        self.cfn_bucket = 'cloudformation-us-west-2-645086751203'
-        self.cfn_template_file = 'challenge20181105-dad-jokes.yaml'
-        self.stack_name = 'serverless-dadjokes-001'
-        self.ssm_config_name = 'dadjoke'
+    def __init__(self, cfn_bucket, cfn_template_file, stack_name, ssm_config_name, aws_region='us-west-2'):
+        self.cfn_bucket = cfn_bucket
+        self.cfn_template_file = cfn_template_file
+        self.stack_name = stack_name
+        self.ssm_config_name = ssm_config_name
 
         self.build_dir = 'build'
         self.dist_dir = 'dist'
@@ -138,7 +138,20 @@ class Deployer:
 
 
 if __name__ == "__main__":
-    deployer = Deployer()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--cfn-bucket", required=True)
+    parser.add_argument("--cfn-template", required=True)
+    parser.add_argument("--stack-name", required=True)
+    parser.add_argument("--ssm-config-name")
+
+    args = parser.parse_args()
+
+    deployer = Deployer(
+        cfn_bucket=args.cfn_bucket,
+        cfn_template_file=args.cfn_template,
+        stack_name=args.stack_name,
+        ssm_config_name=args.ssm_config_name,
+    )
 
     deployer.setup()
     deployer.install_deps()
