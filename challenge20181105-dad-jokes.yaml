@@ -38,7 +38,7 @@ Resources:
   BotPostingSchedule:
     Type: AWS::Events::Rule
     Properties:
-      ScheduleExpression: rate(13 hours)
+      ScheduleExpression: rate(23 hours)
       Targets:
         - Id: TwitterBotDadJokesFunction
           Arn: !GetAtt TwitterBotDadJokesFunction.Arn
