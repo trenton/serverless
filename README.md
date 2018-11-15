@@ -17,6 +17,11 @@
 aws cloudformation update-stack --stack-name serverless003 --template-body file://challenge20181105-serverless-ipsum.yaml --capabilities CAPABILITY_IAM
 ```
 
+or
+```
+./deploy.py --cfn-bucket cloudformation-us-west-2-645086751203 --cfn-template challenge20181105-serverless-ipsum.yaml --stack-name serverless005
+```
+
 **Determine endpoint**
 
 ```

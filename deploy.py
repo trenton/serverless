@@ -12,22 +12,31 @@ import sys
 import tempfile
 import time
 import zipfile
+from botocore.exceptions import ClientError
 
 
 class Deployer:
-    WAIT_FOR_READY_SECONDS = 60 * 3
+    DEFAULT_WAIT_FOR_READY_SECONDS = 60 * 3
 
-    def __init__(self, cfn_bucket, cfn_template_file, stack_name, ssm_config_name, aws_region='us-west-2'):
+    DEFAULT_AWS_REGION = 'us-west-2'
+
+    def __init__(
+            self,
+            cfn_bucket, cfn_template_file, stack_name,
+            ssm_config_name=None,
+            region=DEFAULT_AWS_REGION,
+            wait_for_ready_seconds=DEFAULT_WAIT_FOR_READY_SECONDS):
         self.cfn_bucket = cfn_bucket
         self.cfn_template_file = cfn_template_file
         self.stack_name = stack_name
         self.ssm_config_name = ssm_config_name
+        self.wait_for_ready_seconds = wait_for_ready_seconds
 
         self.build_dir = 'build'
         self.dist_dir = 'dist'
         self.config_file = 'dist/config.ini'
 
-        aws = boto3.Session(region_name=aws_region)
+        aws = boto3.Session(region_name=region)
 
         self.s3 = aws.resource('s3')
         self.cfn = aws.client('cloudformation')
@@ -46,11 +55,6 @@ class Deployer:
         dist_file = f"{os.getcwd()}/{self.dist_dir}/pydist.zip"
         if not os.path.isdir(self.dist_dir):
             os.mkdir(self.dist_dir)
-        else:
-            try:
-                os.remove(dist_file)
-            except FileNotFoundError:
-                pass
 
         self.dist_file = dist_file
 
@@ -62,6 +66,10 @@ class Deployer:
         )
 
     def download_config(self):
+        if not self.ssm_config_name:
+            print(f'No SSM config specified, continuing without {self.config_file}')
+            return
+
         print(f'Downloading config to {self.config_file}')
         ssm_response = self.ssm.get_parameters(
                 Names=[self.ssm_config_name],
@@ -92,7 +100,9 @@ class Deployer:
             for file in itertools.chain(*more_files):
                 zipf.write(file)
 
-            zipf.write(self.config_file, 'config.ini')
+            # config is optional
+            if os.path.isfile(self.config_file):
+                zipf.write(self.config_file, 'config.ini')
 
     def upload(self):
         # add time since epoch to get a different value on each deploy
@@ -105,8 +115,48 @@ class Deployer:
 
         self.s3_code_key = zip_code_s3_key
 
-    def create_change_set(self, poll=True):
-        print(f"Creating change set")
+    def stack_exists(self):
+        try:
+            self.cfn.describe_stacks(StackName=self.stack_name)
+            return True
+        except ClientError as e:
+            if "does not exist" in e.response['Error']['Message']:
+                return False
+            else:
+                raise e
+
+    def create_stack(self):
+        print(f"Creating stack {self.stack_name}")
+        create_response = self.cfn.create_stack(
+            StackName=self.stack_name,
+            Capabilities=['CAPABILITY_NAMED_IAM'],
+            TemplateBody=open(self.cfn_template_file, 'r').read(),
+            Parameters=[
+                {'ParameterKey': 'CfnCodeS3Bucket', 'ParameterValue': self.cfn_bucket},
+                {'ParameterKey': 'CfnCodeS3Key', 'ParameterValue': self.s3_code_key},
+            ],
+        )
+
+    def update_stack(self):
+        print(f"Updating stack {self.stack_name}")
+        try:
+            create_response = self.cfn.update_stack(
+                StackName=self.stack_name,
+                Capabilities=['CAPABILITY_NAMED_IAM'],
+                TemplateBody=open(self.cfn_template_file, 'r').read(),
+                Parameters=[
+                    {'ParameterKey': 'CfnCodeS3Bucket', 'ParameterValue': self.cfn_bucket},
+                    {'ParameterKey': 'CfnCodeS3Key', 'ParameterValue': self.s3_code_key},
+                ],
+            )
+            print(f"Update complete")
+        except ClientError as e:
+            if "No updates are to be performed" in e.response['Error']['Message']:
+                print(f"No updates required")
+            else:
+                raise e
+
+    def create_change_set(self):
         create_response = self.cfn.create_change_set(
             StackName=self.stack_name,
             Capabilities=['CAPABILITY_NAMED_IAM'],
@@ -121,7 +171,7 @@ class Deployer:
         change_set_id = create_response['Id']
 
         print(f"Waiting for change set {change_set_id} to be ready")
-        wait_until = time.time() + Deployer.WAIT_FOR_READY_SECONDS
+        wait_until = time.time() + self.wait_for_ready_seconds
         while time.time() < wait_until:
             change_set = self.cfn.describe_change_set(ChangeSetName=change_set_id)
             print(f"...status was {change_set['Status']}")
@@ -142,6 +192,8 @@ if __name__ == "__main__":
     parser.add_argument("--cfn-bucket", required=True)
     parser.add_argument("--cfn-template", required=True)
     parser.add_argument("--stack-name", required=True)
+    parser.add_argument("--region", default="us-west-2")
+    parser.add_argument("--skip-build", action='store_true')
     parser.add_argument("--ssm-config-name")
 
     args = parser.parse_args()
@@ -150,13 +202,18 @@ if __name__ == "__main__":
         cfn_bucket=args.cfn_bucket,
         cfn_template_file=args.cfn_template,
         stack_name=args.stack_name,
+        region=args.region,
         ssm_config_name=args.ssm_config_name,
     )
 
     deployer.setup()
-    deployer.install_deps()
-    deployer.download_config()
-    deployer.build()
+    if not args.skip_build:
+        deployer.install_deps()
+        deployer.download_config()
+        deployer.build()
+
     deployer.upload()
-    deployer.create_change_set()
-    deployer.execute_change_set()
+    if deployer.stack_exists():
+        deployer.update_stack()
+    else:
+        deployer.create_stack()
