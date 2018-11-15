@@ -2,6 +2,14 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: 'The #noServerNovember Serverless Ipsum challenge'
 
+Parameters:
+  CfnCodeS3Bucket:
+    Description: S3 bucket containing code zip
+    Type: String
+  CfnCodeS3Key:
+    Description: S3 key containing code zip
+    Type: String
+
 Outputs:
   ProdEndpoint:
     Value: !Sub "https://${ApiGw}.execute-api.${AWS::Region}.amazonaws.com/${ApiGwStage}/serverless"
@@ -117,7 +125,7 @@ Resources:
               "headers": {
                 "Content-Type": "text/html; charset=utf-8",
               },
-              "body": body
+              "body": body,
             }
 
             return response
