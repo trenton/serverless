@@ -104,6 +104,7 @@ Resources:
       Code:
         ZipFile: !Sub |
           import logging
+          import json
         
           logger = logging.getLogger()
           logger.setLevel(logging.INFO)
@@ -119,6 +120,8 @@ Resources:
               </body>
             </html>
             """
+
+            logger.info(json.dumps(event))
 
             response = {
               "statusCode": 200,
