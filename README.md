@@ -43,8 +43,12 @@ DRY_RUN=yes ./dad.py
 ```
 
 ## Twitter bot
+### Usage
 
-Instructions incomplete. You need to sign up for [https://developer.twitter.com/en/docs/accounts-and-users/subscribe-account-activity/overview](Twitter's Account Activity API). 
+Tweet an image [@TrentonL](https://twitter.com/TrentonL). Get a response in seconds.
+
+### Setup/install/dev
+Instructions incomplete. You need to sign up for [Twitter's Account Activity API](https://developer.twitter.com/en/docs/accounts-and-users/subscribe-account-activity/overview).
 
 ```
 python3 -m venv .
