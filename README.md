@@ -41,3 +41,18 @@ DRY_RUN=yes ./dad.py
     --ssm-config-name dadjoke
 
 ```
+
+## Twitter bot
+
+Instructions incomplete. You need to sign up for [https://developer.twitter.com/en/docs/accounts-and-users/subscribe-account-activity/overview](Twitter's Account Activity API). 
+
+```
+python3 -m venv .
+pip install -r requirements.txt
+./twitter_picture_bot.py
+./deploy.py \
+	--cfn-bucket cloudformation-us-west-2-645086751203 \
+	--cfn-template challenge20181112-twitter-picture-bot.yaml \
+	--stack-name twitter-picture-bot \
+	--ssm-config-name dadjoke 
+```
