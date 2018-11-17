@@ -194,6 +194,7 @@ if __name__ == "__main__":
     parser.add_argument("--stack-name", required=True)
     parser.add_argument("--region", default="us-west-2")
     parser.add_argument("--skip-build", action='store_true')
+    parser.add_argument("--skip-deps", action='store_true')
     parser.add_argument("--ssm-config-name")
 
     args = parser.parse_args()
@@ -208,8 +209,9 @@ if __name__ == "__main__":
 
     deployer.setup()
     if not args.skip_build:
-        deployer.install_deps()
-        deployer.download_config()
+        if not args.skip_deps:
+            deployer.install_deps()
+            deployer.download_config()
         deployer.build()
 
     deployer.upload()
