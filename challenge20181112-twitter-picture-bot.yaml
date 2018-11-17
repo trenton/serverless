@@ -1,0 +1,127 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'The #noServerNovember Twitter Picture Bot'
+
+Parameters:
+  CfnCodeS3Bucket:
+    Description: S3 bucket containing code zip
+    Type: String
+  CfnCodeS3Key:
+    Description: S3 key containing code zip
+    Type: String
+
+Outputs:
+  ProdEndpoint:
+    Value: !Sub "https://${ApiGw}.execute-api.${AWS::Region}.amazonaws.com/${ApiGwStage}/twitter-webhook"
+
+Resources:
+  ApiGwCloudWatchRole: 
+    Type: AWS::IAM::Role
+    Properties: 
+      ManagedPolicyArns: 
+      - arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
+      Path: "/"
+      AssumeRolePolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+        - Action: ['sts:AssumeRole']
+          Effect: Allow
+          Principal: 
+            Service: ["apigateway.amazonaws.com"]
+
+  ApiGwAccount:
+    Type: AWS::ApiGateway::Account
+    Properties: 
+      CloudWatchRoleArn: !GetAtt ['ApiGwCloudWatchRole', 'Arn']
+    
+  ApiGw:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: 'Twitter Picture Webhook Responder'
+      FailOnWarnings: true
+
+  ApiGwDeployment:
+    Type: AWS::ApiGateway::Deployment
+    # Required -- see https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-apigateway-deployment.html
+    DependsOn: ApiGwMethod
+    Properties:
+      RestApiId: !Ref ApiGw
+
+  ApiGwStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      DeploymentId: !Ref ApiGwDeployment
+      MethodSettings:
+        - DataTraceEnabled: true
+          HttpMethod: '*'
+          LoggingLevel: INFO
+          ResourcePath: '/*'
+          ThrottlingRateLimit: 2
+          ThrottlingBurstLimit: 20
+      RestApiId: !Ref ApiGw
+      StageName: prod
+
+  ApiGwResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGw
+      ParentId: !GetAtt ["ApiGw", "RootResourceId"]
+      PathPart: "{proxy+}"
+
+  ApiGwMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGw
+      ResourceId: !Ref ApiGwResource
+      HttpMethod: ANY
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ServerlessIpsumFunction.Arn}/invocations"
+
+  FunctionExecRole:
+    Type: AWS::IAM::Role
+    Properties:
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      - arn:aws:iam::aws:policy/AmazonRekognitionReadOnlyAccess
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Action: ['sts:AssumeRole']
+          Effect: Allow
+          Principal:
+            Service: [lambda.amazonaws.com]
+
+
+  ServerlessIpsumFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: 'Responder for Twitter webhook POST'
+      #Handler: 'twitter_picture_bot.handler'
+      Handler: twitter_picture_bot.handler
+      Runtime: python3.6
+      Role: !GetAtt FunctionExecRole.Arn
+      Timeout: 11
+      Code:
+        S3Bucket: !Ref CfnCodeS3Bucket
+        S3Key: !Ref CfnCodeS3Key
+      
+  ServerlessIpsumFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref ServerlessIpsumFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn:
+        Fn::Join:
+        - ""
+        - - 'arn:aws:execute-api:'
+          - !Ref AWS::Region
+          - ':'
+          - !Ref AWS::AccountId
+          - ':'
+          - !Ref ApiGw
+          - '/*'
+...
